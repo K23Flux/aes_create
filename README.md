@@ -13,5 +13,6 @@
 
 在你的 VPS 终端（SSH）中执行以下命令即可启动工具：
 
-```bash
-bash <(curl -sL [https://raw.githubusercontent.com/K23Flux/aes_create/main/go/keygen.sh](https://raw.githubusercontent.com/K23Flux/aes_create/main/go/keygen.sh))
+```
+bash <(curl -sL https://raw.githubusercontent.com/K23Flux/aes_create/main/go/keygen.sh)
+```
