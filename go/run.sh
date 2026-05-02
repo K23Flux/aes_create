@@ -12,7 +12,7 @@ TMP_FILE="/tmp/vps_keygen.sh"
 
 # 下载脚本
 echo "正在下载脚本..."
-curl -sL "$SCRIPT_URL" -o "$TMP_FILE"
+curl -fsSL "$SCRIPT_URL" -o "$TMP_FILE"
 
 # 检查下载是否成功
 if [ ! -s "$TMP_FILE" ]; then

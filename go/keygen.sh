@@ -19,19 +19,30 @@ print_result() {
     local label=$1
     local value=$2
     local color=${3:-$GREEN} 
-    echo -e "${1}:"
+    echo -e "${label}:"
     echo -e "${color}${value}${NC}\n"
 }
 
-# Hex 转 Base64 (兼容纯 Shell 环境)
-hex_to_base64() {
-    local hex_clean=$(echo "$1" | tr -d ': ')
-    if command -v xxd >/dev/null 2>&1; then
-        echo -n "$hex_clean" | xxd -r -p | base64 | tr -d '\n'
-    else
-        local escape_hex=$(echo "$hex_clean" | sed 's/../\\x&/g')
-        printf "$escape_hex" | base64 | tr -d '\n'
+# Hex 转 Reality 需要的 URL-safe Base64，无 padding
+hex_to_base64_url() {
+    local hex_clean
+    hex_clean=$(echo "$1" | tr -d ':[:space:]')
+
+    if [ -z "$hex_clean" ]; then
+        return 1
     fi
+
+    if command -v xxd >/dev/null 2>&1; then
+        printf '%s' "$hex_clean" | xxd -r -p | base64 | tr '+/' '-_' | tr -d '=\n'
+    else
+        local escape_hex
+        escape_hex=$(echo "$hex_clean" | sed 's/../\\x&/g')
+        printf '%b' "$escape_hex" | base64 | tr '+/' '-_' | tr -d '=\n'
+    fi
+}
+
+extract_key_value() {
+    echo "$1" | awk -F': *' -v name="$2" 'tolower($1) == name {print $2; exit}'
 }
 
 # --- 功能模块 ---
@@ -47,7 +58,8 @@ generate_ss() {
         len=32
     fi
 
-    local key=$(openssl rand -base64 $len)
+    local key
+    key=$(openssl rand -base64 "$len")
     print_result "Key (${len} bytes)" "$key"
 }
 
@@ -59,14 +71,17 @@ generate_uuid() {
     else
         uuid=$(uuidgen)
     fi
+    uuid=$(echo "$uuid" | tr '[:upper:]' '[:lower:]')
     print_result "UUID" "$uuid"
 }
 
 generate_socks() {
     print_header "Socks5 账号密码"
-    local rand_user=$(tr -dc 'a-z0-9' < /dev/urandom | head -c 6)
+    local rand_user
+    rand_user=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6)
     local user="user_$rand_user"
-    local pass=$(tr -dc 'a-zA-Z0-9!@#%^&*' < /dev/urandom | head -c 20)
+    local pass
+    pass=$(LC_ALL=C tr -dc 'a-zA-Z0-9!@#%^&*' < /dev/urandom | head -c 20)
     
     print_result "Username" "$user"
     print_result "Password" "$pass"
@@ -74,31 +89,61 @@ generate_socks() {
 
 generate_reality() {
     print_header "Reality (X25519) 密钥对"
-    
-    if ! command -v openssl >/dev/null 2>&1; then
-        echo -e "${RED}错误: 未找到 openssl，请先安装 (apt/yum install openssl)${NC}"
+
+    local output=""
+    local priv_b64=""
+    local pub_b64=""
+
+    if command -v xray >/dev/null 2>&1; then
+        output=$(xray x25519 2>/dev/null)
+        priv_b64=$(extract_key_value "$output" "private key")
+        pub_b64=$(extract_key_value "$output" "public key")
+    elif command -v sing-box >/dev/null 2>&1; then
+        output=$(sing-box generate reality-keypair 2>/dev/null)
+        priv_b64=$(extract_key_value "$output" "privatekey")
+        pub_b64=$(extract_key_value "$output" "publickey")
+    fi
+
+    if [ -n "$priv_b64" ] && [ -n "$pub_b64" ]; then
+        print_result "Private Key (服务端)" "$priv_b64" "$RED"
+        print_result "Public Key (客户端)" "$pub_b64" "$GREEN"
         return
     fi
 
-    local tmp_dir=$(mktemp -d)
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo -e "${RED}错误: 未找到 xray、sing-box 或 openssl，无法生成 Reality 密钥对。${NC}"
+        return 1
+    fi
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
     local priv_pem="$tmp_dir/priv.pem"
     
-    # 生成私钥 PEM
-    openssl genpkey -algorithm x25519 -out "$priv_pem" 2>/dev/null
+    if ! openssl genpkey -algorithm x25519 -out "$priv_pem" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        echo -e "${RED}错误: 当前 openssl 不支持 X25519，请安装 xray 或 sing-box 后重试。${NC}"
+        return 1
+    fi
     
-    # 提取 hex 数据
-    local full_text=$(openssl pkey -in "$priv_pem" -text 2>/dev/null)
-    local priv_hex=$(echo "$full_text" | awk '/priv:/{flag=1; next} /pub:/{flag=0} flag {print}' | tr -d '\n: ')
-    local pub_hex=$(echo "$full_text" | awk '/pub:/{flag=1; next} flag {print}' | tr -d '\n: ')
+    local full_text
+    full_text=$(openssl pkey -in "$priv_pem" -text -noout 2>/dev/null)
+    local priv_hex
+    local pub_hex
+    priv_hex=$(echo "$full_text" | awk '/priv:/{flag=1; next} /pub:/{flag=0} flag {print}' | tr -d '\n:[:space:]')
+    pub_hex=$(echo "$full_text" | awk '/pub:/{flag=1; next} flag {print}' | tr -d '\n:[:space:]')
 
-    # 转换为 Base64
-    local priv_b64=$(hex_to_base64 "$priv_hex")
-    local pub_b64=$(hex_to_base64 "$pub_hex")
+    priv_b64=$(hex_to_base64_url "$priv_hex")
+    pub_b64=$(hex_to_base64_url "$pub_hex")
+
+    rm -rf "$tmp_dir"
+
+    if [ -z "$priv_b64" ] || [ -z "$pub_b64" ]; then
+        echo -e "${RED}错误: Reality 密钥解析失败，请安装 xray 或 sing-box 后重试。${NC}"
+        return 1
+    fi
 
     print_result "Private Key (服务端)" "$priv_b64" "$RED"
     print_result "Public Key (客户端)" "$pub_b64" "$GREEN"
-
-    rm -rf "$tmp_dir"
 }
 
 # --- 主程序 ---

@@ -337,9 +337,9 @@
         </header>
 
         <nav class="tabs-nav">
-            <button class="tab-btn active" onclick="switchTab('ss')">Shadowsocks-2022</button>
-            <button class="tab-btn" onclick="switchTab('vless')">VLESS / Reality</button>
-            <button class="tab-btn" onclick="switchTab('socks')">Socks5 User</button>
+            <button class="tab-btn active" onclick="switchTab('ss', this)">Shadowsocks-2022</button>
+            <button class="tab-btn" onclick="switchTab('vless', this)">VLESS / Reality</button>
+            <button class="tab-btn" onclick="switchTab('socks', this)">Socks5 User</button>
         </nav>
 
         <div id="ss" class="tab-content active">
@@ -441,6 +441,10 @@
             return btoa(binaryString);
         }
 
+        function toBase64Url(uint8array) {
+            return toBase64(uint8array).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+        }
+
         function generateSS() {
             const bytes = parseInt(document.getElementById('ss-method').value);
             const randomValues = new Uint8Array(bytes);
@@ -459,8 +463,8 @@
                 return;
             }
             const keyPair = nacl.box.keyPair();
-            document.getElementById('public-key').value = toBase64(keyPair.publicKey);
-            document.getElementById('private-key').value = toBase64(keyPair.secretKey);
+            document.getElementById('public-key').value = toBase64Url(keyPair.publicKey);
+            document.getElementById('private-key').value = toBase64Url(keyPair.secretKey);
         }
 
         function generateSocks() {
@@ -481,13 +485,11 @@
         }
 
         // --- UI 交互逻辑 ---
-        function switchTab(id) {
+        function switchTab(id, button) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
             document.getElementById(id).classList.add('active');
-            // Find the button that was clicked (event target or its closest tab-btn parent)
-            const activeBtn = event.target.closest('.tab-btn');
-            if (activeBtn) activeBtn.classList.add('active');
+            button.classList.add('active');
         }
 
         function copy(id) {
@@ -511,7 +513,8 @@
         function showToast(msg, isError = false) {
             const toast = document.getElementById('toast');
             clearTimeout(toastTimeout);
-            if (msg) toast.innerHTML = (isError ? '<i data-feather="alert-circle"></i> ' : '<i data-feather="check-circle"></i> ') + msg;
+            const text = msg || '已成功复制到剪贴板';
+            toast.innerHTML = (isError ? '<i data-feather="alert-circle"></i> ' : '<i data-feather="check-circle"></i> ') + text;
             if (isError) toast.style.background = 'var(--danger)'; else toast.style.background = 'var(--success)';
             feather.replace(); // 刷新 toast 里的图标
 
